@@ -6,6 +6,7 @@ import { createContext, useContext, useState, useEffect } from "react"
 import type { User } from "@/lib/types"
 import axios from "axios"
 
+
 // Update the axios configuration to use environment variables
 axios.defaults.baseURL = process.env.NEXT_PUBLIC_API_URL || "https://chucklechain-api.onrender.com"
 axios.defaults.withCredentials = true
