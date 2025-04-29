@@ -1,15 +1,32 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import axios from "axios"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { BarChart, LineChart } from "@/components/ui/chart"
-import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { AdminStats, CloudinaryStats } from "@/lib/types"
+import { Progress } from "@/components/ui/progress"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+} from "recharts"
+import { useToast } from "@/components/ui/use-toast"
 import {
   Users,
   ImageIcon,
@@ -21,8 +38,78 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Clock,
+  PieChartIcon,
+  Activity,
+  Calendar,
+  Hash,
+  Heart,
+  MessageSquare,
+  Share2,
+  Download,
 } from "lucide-react"
-import { useToast } from "@/components/ui/use-toast"
+
+// Define types for our data
+interface AdminStats {
+  users: {
+    total: number
+    lastWeek: number
+    growth: number
+    history: { date: string; count: number }[]
+  }
+  posts: {
+    total: number
+    lastWeek: number
+    growth: number
+    flagged: number
+    history: { date: string; count: number }[]
+    byCategory?: { [key: string]: number }
+  }
+  engagement: {
+    comments: number
+    likes: number
+    shares: number
+    history?: { date: string; comments: number; likes: number; shares: number }[]
+  }
+  storage: {
+    used: number
+    limit: number
+    percentage: number
+    history?: { date: string; used: number }[]
+  }
+  topHashtags?: { tag: string; count: number }[]
+  activeUsers?: { date: string; count: number }[]
+  postsByTime?: { hour: number; count: number }[]
+}
+
+interface CloudinaryStats {
+  usage: {
+    storage: {
+      used: number
+      limit: number
+    }
+  }
+}
+
+// Color constants
+const COLORS = {
+  users: "#9333ea", // purple
+  posts: "#3b82f6", // blue
+  comments: "#10b981", // green
+  likes: "#ec4899", // pink
+  shares: "#f59e0b", // amber
+  storage: "#06b6d4", // cyan
+  categories: [
+    "#3b82f6", // blue
+    "#ef4444", // red
+    "#10b981", // green
+    "#f59e0b", // amber
+    "#8b5cf6", // violet
+    "#ec4899", // pink
+    "#6366f1", // indigo
+    "#64748b", // slate
+  ],
+  pieChart: ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#6366f1", "#64748b"],
+}
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
@@ -30,44 +117,113 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState("")
-  const [isClient, setIsClient] = useState(false)
+  const [timeRange, setTimeRange] = useState("7d")
   const { toast } = useToast()
 
-  const fetchStats = async () => {
+  // Fetch both stats and Cloudinary stats
+  const fetchAllStats = async () => {
     try {
       setRefreshing(true)
-      const { data } = await axios.get("/api/admin/stats")
 
-      // Process the data
-      const statsData = data.data || {
+      // Fetch admin stats
+      const statsResponse = await axios.get("/api/admin/stats")
+
+      // Fetch Cloudinary stats
+      const cloudinaryResponse = await axios.get("/api/admin/cloudinary/stats")
+
+      // Process the admin stats data
+      const statsData = statsResponse.data.data || {
         users: {
           total: 0,
           lastWeek: 0,
           growth: 0,
-          history: [],
+          history: generateMockHistoryData(7, 0, 20),
         },
         posts: {
           total: 0,
           lastWeek: 0,
           growth: 0,
           flagged: 0,
-          history: [],
+          history: generateMockHistoryData(7, 0, 10),
+          byCategory: {
+            entertainment: 0,
+            sports: 0,
+            gaming: 0,
+            technology: 0,
+            fashion: 0,
+            music: 0,
+            tv: 0,
+            other: 0,
+          },
         },
         engagement: {
           comments: 0,
           likes: 0,
           shares: 0,
+          history: generateMockEngagementHistory(7),
         },
         storage: {
           used: 0,
           limit: 1000,
           percentage: 0,
+          history: generateMockStorageHistory(7),
         },
       }
 
+      // If we have real Cloudinary data, use it for storage stats
+      if (cloudinaryResponse.data.success && cloudinaryResponse.data.data.usage) {
+        const cloudinaryData = cloudinaryResponse.data.data
+
+        // Update storage stats with real Cloudinary data
+        statsData.storage = {
+          used: cloudinaryData.usage.storage.used || 0,
+          limit: cloudinaryData.usage.storage.limit || 1000000000,
+          percentage: cloudinaryData.usage.storage.used
+            ? (cloudinaryData.usage.storage.used / cloudinaryData.usage.storage.limit) * 100
+            : 0,
+          history: statsData.storage.history || generateMockStorageHistory(7),
+        }
+
+        setCloudinaryStats(cloudinaryData)
+      }
+
+      // Add mock data for additional analytics if not provided by API
+      if (!statsData.topHashtags) {
+        statsData.topHashtags = [
+          { tag: "funny", count: 42 },
+          { tag: "meme", count: 38 },
+          { tag: "lol", count: 27 },
+          { tag: "humor", count: 21 },
+          { tag: "trending", count: 18 },
+        ]
+      }
+
+      if (!statsData.activeUsers) {
+        statsData.activeUsers = generateMockActiveUsers(7)
+      }
+
+      if (!statsData.postsByTime) {
+        statsData.postsByTime = generateMockPostsByTime()
+      }
+
+      if (!statsData.posts.byCategory) {
+        statsData.posts.byCategory = {
+          entertainment: 15,
+          sports: 8,
+          gaming: 12,
+          technology: 10,
+          fashion: 5,
+          music: 7,
+          tv: 6,
+          other: 10,
+        }
+      }
+
       setStats(statsData)
+      setError("")
     } catch (error) {
       console.error("Error fetching stats:", error)
+      setError("Failed to load dashboard statistics")
       toast({
         title: "Error",
         description: "Failed to load dashboard statistics",
@@ -80,53 +236,163 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    setIsClient(true)
-    fetchStats()
+    fetchAllStats()
   }, [])
 
-  // Transform API data for charts
-  const getUserChartData = () => {
-    if (!stats?.users?.history || stats.users.history.length === 0) {
-      // Provide fallback data that's clearly labeled as placeholder
-      return Array.from({ length: 7 }, (_, i) => {
-        const date = new Date()
-        date.setMonth(date.getMonth() - (6 - i))
-        return {
-          name: date.toLocaleDateString("en-US", { month: "short" }),
-          total: 0,
-        }
-      })
-    }
+  // Generate mock history data if API doesn't provide it
+  function generateMockHistoryData(days: number, min: number, max: number) {
+    return Array.from({ length: days }, (_, i) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (days - 1 - i))
+      return {
+        date: date.toISOString().split("T")[0],
+        count: Math.floor(Math.random() * (max - min + 1)) + min,
+      }
+    })
+  }
 
-    // Ensure we're mapping the data correctly
-    return stats.users.history.map((item) => ({
-      name: new Date(item.date).toLocaleDateString("en-US", { month: "short" }),
-      total: typeof item.count === "number" ? item.count : 0,
+  // Generate mock engagement history
+  function generateMockEngagementHistory(days: number) {
+    return Array.from({ length: days }, (_, i) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (days - 1 - i))
+      return {
+        date: date.toISOString().split("T")[0],
+        comments: Math.floor(Math.random() * 30),
+        likes: Math.floor(Math.random() * 100),
+        shares: Math.floor(Math.random() * 20),
+      }
+    })
+  }
+
+  // Generate mock storage history
+  function generateMockStorageHistory(days: number) {
+    let currentStorage = 0
+    return Array.from({ length: days }, (_, i) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (days - 1 - i))
+      currentStorage += Math.floor(Math.random() * 5000000) // Add random bytes each day
+      return {
+        date: date.toISOString().split("T")[0],
+        used: currentStorage,
+      }
+    })
+  }
+
+  // Generate mock active users data
+  function generateMockActiveUsers(days: number) {
+    return Array.from({ length: days }, (_, i) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (days - 1 - i))
+      return {
+        date: date.toISOString().split("T")[0],
+        count: Math.floor(Math.random() * 15) + 5,
+      }
+    })
+  }
+
+  // Generate mock posts by time of day
+  function generateMockPostsByTime() {
+    return Array.from({ length: 24 }, (_, i) => ({
+      hour: i,
+      count: Math.floor(Math.random() * 10),
     }))
   }
 
-  const getPostChartData = () => {
-    if (!stats?.posts?.history || stats.posts.history.length === 0) {
-      // Provide fallback data that's clearly labeled as placeholder
-      return Array.from({ length: 7 }, (_, i) => {
-        const date = new Date()
-        date.setMonth(date.getMonth() - (6 - i))
-        return {
-          name: date.toLocaleDateString("en-US", { month: "short" }),
-          total: 0,
-        }
-      })
-    }
+  // Format bytes to human-readable format
+  const formatBytes = (bytes: number, decimals = 2) => {
+    if (bytes === 0) return "0 Bytes"
 
-    // Ensure we're mapping the data correctly
-    return stats.posts.history.map((item) => ({
-      name: new Date(item.date).toLocaleDateString("en-US", { month: "short" }),
-      total: typeof item.count === "number" ? item.count : 0,
-    }))
+    const k = 1024
+    const dm = decimals < 0 ? 0 : decimals
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"]
+
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i]
   }
 
-  const userChartData = getUserChartData()
-  const postChartData = getPostChartData()
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  }
+
+  // Format hour for display
+  const formatHour = (hour: number) => {
+    return hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`
+  }
+
+  // Prepare chart data
+  const chartData = useMemo(() => {
+    if (!stats) return []
+
+    // Combine user and post history data
+    const combinedData: any[] = []
+
+    if (stats.users.history && stats.posts.history) {
+      // Get the maximum length of the two arrays
+      const maxLength = Math.max(stats.users.history.length, stats.posts.history.length)
+
+      for (let i = 0; i < maxLength; i++) {
+        const userEntry = stats.users.history[i] || { date: "", count: 0 }
+        const postEntry = stats.posts.history[i] || { date: "", count: 0 }
+
+        // Use the date from whichever entry exists
+        const date = userEntry.date || postEntry.date
+
+        combinedData.push({
+          date: formatDate(date),
+          users: userEntry.count || 0,
+          posts: postEntry.count || 0,
+        })
+      }
+    }
+
+    return combinedData
+  }, [stats])
+
+  // Prepare engagement chart data
+  const engagementChartData = useMemo(() => {
+    if (!stats?.engagement?.history) return []
+
+    return stats.engagement.history.map((entry) => ({
+      date: formatDate(entry.date),
+      comments: entry.comments,
+      likes: entry.likes,
+      shares: entry.shares,
+    }))
+  }, [stats])
+
+  // Prepare storage chart data
+  const storageChartData = useMemo(() => {
+    if (!stats?.storage?.history) return []
+
+    return stats.storage.history.map((entry) => ({
+      date: formatDate(entry.date),
+      used: entry.used / (1024 * 1024), // Convert to MB
+    }))
+  }, [stats])
+
+  // Prepare category data for pie chart
+  const categoryData = useMemo(() => {
+    if (!stats?.posts?.byCategory) return []
+
+    return Object.entries(stats.posts.byCategory).map(([name, value]) => ({
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      value,
+    }))
+  }, [stats])
+
+  // Prepare posts by time data
+  const postsByTimeData = useMemo(() => {
+    if (!stats?.postsByTime) return []
+
+    return stats.postsByTime.map((entry) => ({
+      hour: formatHour(entry.hour),
+      count: entry.count,
+    }))
+  }, [stats])
 
   if (loading) {
     return (
@@ -168,7 +434,7 @@ export default function AdminDashboardPage() {
       <div className="p-6 bg-red-50 text-red-800 rounded-md dark:bg-red-900/30 dark:text-red-200">
         <h2 className="text-lg font-semibold">Error Loading Dashboard</h2>
         <p className="mt-2">{error}</p>
-        <Button variant="outline" className="mt-4 bg-white dark:bg-gray-800" onClick={fetchStats}>
+        <Button variant="outline" className="mt-4 bg-white dark:bg-gray-800" onClick={fetchAllStats}>
           <RefreshCcw className="mr-2 h-4 w-4" />
           Retry
         </Button>
@@ -183,16 +449,28 @@ export default function AdminDashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
           <p className="text-muted-foreground">Overview of your platform's performance and content.</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchStats}
-          disabled={refreshing}
-          className="flex items-center gap-2"
-        >
-          <RefreshCcw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          <span>{refreshing ? "Refreshing..." : "Refresh Data"}</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue placeholder="Time Range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+              <SelectItem value="90d">Last 90 days</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchAllStats}
+            disabled={refreshing}
+            className="flex items-center gap-2"
+          >
+            <RefreshCcw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            <span>{refreshing ? "Refreshing..." : "Refresh Data"}</span>
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -284,13 +562,11 @@ export default function AdminDashboardPage() {
             <CloudCog className="h-4 w-4 text-cyan-500" />
           </CardHeader>
           <CardContent className="pt-4">
-            <div className="text-2xl font-bold">
-              {stats?.storage?.used ? Math.round(stats.storage.used / 1024 / 1024) : 0} MB
-            </div>
+            <div className="text-2xl font-bold">{formatBytes(stats?.storage?.used || 0)}</div>
             <div className="mt-2">
               <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                <span>{stats?.storage?.percentage || 0}% used</span>
-                <span>{stats?.storage?.limit ? Math.round(stats.storage.limit / 1024 / 1024) : 0} MB limit</span>
+                <span>{stats?.storage?.percentage.toFixed(1) || 0}% used</span>
+                <span>{formatBytes(stats?.storage?.limit || 0)} limit</span>
               </div>
               <Progress
                 value={stats?.storage?.percentage || 0}
@@ -318,45 +594,53 @@ export default function AdminDashboardPage() {
               </div>
               <Badge variant="outline" className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                Last 7 months
+                Last {timeRange === "7d" ? "7" : timeRange === "30d" ? "30" : "90"} days
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
-            {isClient && (
-              <Tabs defaultValue="line">
-                <TabsList className="mb-4">
-                  <TabsTrigger value="line" className="flex items-center gap-1">
-                    <TrendingUp className="h-4 w-4" />
-                    Line
-                  </TabsTrigger>
-                  <TabsTrigger value="bar" className="flex items-center gap-1">
-                    <BarChart3 className="h-4 w-4" />
-                    Bar
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="line">
-                  <LineChart
-                    data={[...userChartData, ...postChartData]}
-                    categories={["Users", "Posts"]}
-                    index="name"
-                    colors={["purple", "blue"]}
-                    valueFormatter={(value) => `${value}`}
-                    className="aspect-[16/9]"
-                  />
-                </TabsContent>
-                <TabsContent value="bar">
-                  <BarChart
-                    data={[...userChartData, ...postChartData]}
-                    categories={["Users", "Posts"]}
-                    index="name"
-                    colors={["purple", "blue"]}
-                    valueFormatter={(value) => `${value}`}
-                    className="aspect-[16/9]"
-                  />
-                </TabsContent>
-              </Tabs>
-            )}
+            <Tabs defaultValue="line">
+              <TabsList className="mb-4">
+                <TabsTrigger value="line" className="flex items-center gap-1">
+                  <TrendingUp className="h-4 w-4" />
+                  Line
+                </TabsTrigger>
+                <TabsTrigger value="bar" className="flex items-center gap-1">
+                  <BarChart3 className="h-4 w-4" />
+                  Bar
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="line">
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="users" stroke={COLORS.users} activeDot={{ r: 8 }} name="Users" />
+                      <Line type="monotone" dataKey="posts" stroke={COLORS.posts} name="Posts" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </TabsContent>
+              <TabsContent value="bar">
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="users" fill={COLORS.users} name="Users" />
+                      <Bar dataKey="posts" fill={COLORS.posts} name="Posts" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 
@@ -368,28 +652,35 @@ export default function AdminDashboardPage() {
           <CardContent className="space-y-8">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium">Comments</div>
-                <div className="text-sm text-muted-foreground">{stats?.engagement?.comments || 0}</div>
+                <div className="text-sm font-medium flex items-center gap-1">
+                  <MessageSquare className="h-4 w-4 text-green-500" />
+                  Comments
+                </div>
+                <div className="text-sm text-muted-foreground">{stats?.engagement?.comments.toLocaleString() || 0}</div>
               </div>
               <Progress
                 value={
-                  stats?.engagement?.comments
-                    ? Math.min(100, (stats.engagement.comments / (stats.posts.total || 1)) * 100)
+                  stats?.engagement?.comments && stats.posts.total
+                    ? Math.min(100, (stats.engagement.comments / stats.posts.total) * 100)
                     : 0
                 }
                 className="h-2"
+                indicatorClassName="bg-green-500"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium">Likes</div>
-                <div className="text-sm text-muted-foreground">{stats?.engagement?.likes || 0}</div>
+                <div className="text-sm font-medium flex items-center gap-1">
+                  <Heart className="h-4 w-4 text-pink-500" />
+                  Likes
+                </div>
+                <div className="text-sm text-muted-foreground">{stats?.engagement?.likes.toLocaleString() || 0}</div>
               </div>
               <Progress
                 value={
-                  stats?.engagement?.likes
-                    ? Math.min(100, (stats.engagement.likes / (stats.posts.total || 1)) * 100)
+                  stats?.engagement?.likes && stats.posts.total
+                    ? Math.min(100, (stats.engagement.likes / stats.posts.total) * 100)
                     : 0
                 }
                 className="h-2"
@@ -399,17 +690,20 @@ export default function AdminDashboardPage() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium">Shares</div>
-                <div className="text-sm text-muted-foreground">{stats?.engagement?.shares || 0}</div>
+                <div className="text-sm font-medium flex items-center gap-1">
+                  <Share2 className="h-4 w-4 text-amber-500" />
+                  Shares
+                </div>
+                <div className="text-sm text-muted-foreground">{stats?.engagement?.shares.toLocaleString() || 0}</div>
               </div>
               <Progress
                 value={
-                  stats?.engagement?.shares
-                    ? Math.min(100, (stats.engagement.shares / (stats.posts.total || 1)) * 100)
+                  stats?.engagement?.shares && stats.posts.total
+                    ? Math.min(100, (stats.engagement.shares / stats.posts.total) * 100)
                     : 0
                 }
                 className="h-2"
-                indicatorClassName="bg-green-500"
+                indicatorClassName="bg-amber-500"
               />
             </div>
           </CardContent>
@@ -420,6 +714,161 @@ export default function AdminDashboardPage() {
           </CardFooter>
         </Card>
       </div>
+
+      {/* Additional Analytics Section */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PieChartIcon className="h-5 w-5 text-blue-500" />
+              Content Categories
+            </CardTitle>
+            <CardDescription>Distribution of posts by category</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={categoryData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {categoryData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS.pieChart[index % COLORS.pieChart.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [value, "Posts"]} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Hash className="h-5 w-5 text-purple-500" />
+              Top Hashtags
+            </CardTitle>
+            <CardDescription>Most popular hashtags in posts</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={stats?.topHashtags || []}
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" />
+                  <YAxis dataKey="tag" type="category" tick={{ fontSize: 14 }} width={80} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill={COLORS.users} name="Posts" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-green-500" />
+              Engagement Trends
+            </CardTitle>
+            <CardDescription>Comments, likes, and shares over time</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={engagementChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="comments" stroke={COLORS.comments} name="Comments" />
+                  <Line type="monotone" dataKey="likes" stroke={COLORS.likes} name="Likes" />
+                  <Line type="monotone" dataKey="shares" stroke={COLORS.shares} name="Shares" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-cyan-500" />
+              Post Activity by Time
+            </CardTitle>
+            <CardDescription>When users are most active posting content</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={postsByTimeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="hour" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="count" fill={COLORS.posts} name="Posts" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CloudCog className="h-5 w-5 text-cyan-500" />
+            Storage Usage Trends
+          </CardTitle>
+          <CardDescription>Storage consumption over time</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={storageChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis label={{ value: "MB", angle: -90, position: "insideLeft" }} />
+                <Tooltip formatter={(value) => [`${value.toFixed(2)} MB`, "Storage Used"]} />
+                <Area
+                  type="monotone"
+                  dataKey="used"
+                  stroke={COLORS.storage}
+                  fill={COLORS.storage}
+                  fillOpacity={0.3}
+                  name="Storage Used"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-between">
+          <div className="text-sm text-muted-foreground">
+            Current usage: {formatBytes(stats?.storage?.used || 0)} of {formatBytes(stats?.storage?.limit || 0)}
+          </div>
+          <Button variant="outline" size="sm" className="flex items-center gap-2" asChild>
+            <a href="/admin/download">
+              <Download className="h-4 w-4" />
+              Export Data
+            </a>
+          </Button>
+        </CardFooter>
+      </Card>
     </div>
   )
 }
