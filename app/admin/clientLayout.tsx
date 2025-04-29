@@ -17,12 +17,48 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter()
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [adminChecked, setAdminChecked] = useState(false)
 
   useEffect(() => {
     // Skip redirect for login page
     if (pathname === "/admin/login") return
 
-    if (!isLoading) {
+    // Function to check admin status
+    const checkAdminStatus = async () => {
+      try {
+        // Get token from localStorage
+        const token = localStorage.getItem("adminToken")
+
+        if (!token) {
+          console.log("No admin token found, redirecting to login")
+          router.push("/admin/login")
+          return
+        }
+
+        // Set token in axios headers
+        axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
+
+        // Try to access an admin endpoint to verify admin status
+        await axios.get("/api/admin/stats")
+
+        // If we get here, the user is an admin
+        setAdminChecked(true)
+      } catch (error) {
+        console.error("Admin check failed:", error)
+
+        // If we get a 401/403, redirect to login
+        if (
+          axios.isAxiosError(error) &&
+          error.response &&
+          (error.response.status === 401 || error.response.status === 403)
+        ) {
+          console.log("Admin access denied, redirecting to login")
+          router.push("/admin/login")
+        }
+      }
+    }
+
+    if (!isLoading && !adminChecked) {
       // If not authenticated, redirect to admin login
       if (!user) {
         router.push("/admin/login")
@@ -34,29 +70,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         router.push("/")
         return
       }
-    }
-  }, [isLoading, user, router, pathname])
 
-  // Add this new function to handle token-based authentication
-  const checkAdminAuth = async () => {
-    try {
-      const token = localStorage.getItem("adminToken")
-      if (token) {
-        // Set the token in axios headers for all subsequent requests
-        axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
-      }
-    } catch (error) {
-      console.error("Error checking admin auth:", error)
+      // Verify admin status with backend
+      checkAdminStatus()
     }
-  }
-
-  // Add a new useEffect to run the auth check on mount
-  useEffect(() => {
-    checkAdminAuth()
-  }, [])
+  }, [isLoading, user, router, pathname, adminChecked])
 
   // Show loading state while checking authentication
-  if (isLoading && pathname !== "/admin/login") {
+  if ((isLoading || !adminChecked) && pathname !== "/admin/login") {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>

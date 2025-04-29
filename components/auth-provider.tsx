@@ -27,6 +27,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Set up axios interceptor to include token in all requests
+  useEffect(() => {
+    const token = localStorage.getItem("adminToken")
+    if (token) {
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
+    }
+
+    // Add response interceptor to handle 401/403 errors
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+          // If we get a 401/403 and we're in the admin section, try to refresh the token
+          if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
+            console.log("Auth error in admin section, checking authentication...")
+            // We could implement a token refresh here if needed
+          }
+        }
+        return Promise.reject(error)
+      },
+    )
+
+    return () => {
+      // Clean up interceptor when component unmounts
+      axios.interceptors.response.eject(interceptor)
+    }
+  }, [])
+
   useEffect(() => {
     // Check if user is logged in
     const checkAuth = async () => {
@@ -37,6 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
+        // First check if we have a token in localStorage
+        const token = localStorage.getItem("adminToken")
+        if (token) {
+          axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
+        }
+
         const { data } = await axios.get("/api/auth/me")
         if (data.success) {
           setUser({
@@ -51,6 +85,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error("Authentication error:", error)
         setUser(null)
+        // Clear token if authentication fails
+        localStorage.removeItem("adminToken")
+        delete axios.defaults.headers.common["Authorization"]
       } finally {
         setIsLoading(false)
       }
@@ -68,6 +105,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       if (data.success) {
+        // Store token in localStorage
+        if (data.token) {
+          localStorage.setItem("adminToken", data.token)
+          axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`
+        }
+
         setUser({
           id: data.data._id,
           username: data.data.username,
@@ -97,6 +140,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       if (data.success) {
+        // Store token in localStorage
+        if (data.token) {
+          localStorage.setItem("adminToken", data.token)
+          axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`
+        }
+
         setUser({
           id: data.data._id,
           username: data.data.username,
@@ -127,6 +176,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       if (data.success) {
+        // Store token in localStorage
+        if (data.token) {
+          localStorage.setItem("adminToken", data.token)
+          axios.defaults.headers.common["Authorization"] = `Bearer ${data.token}`
+        }
+
         setUser({
           id: data.data._id,
           username: data.data.username,
@@ -150,6 +205,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await axios.get("/api/auth/logout")
       setUser(null)
+      // Clear token from localStorage
+      localStorage.removeItem("adminToken")
+      delete axios.defaults.headers.common["Authorization"]
     } catch (error) {
       console.error("Logout error:", error)
     }
