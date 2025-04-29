@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Shield } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
+import axios from "axios"
 
 export default function AdminLoginPage() {
   const [username, setUsername] = useState("")
@@ -25,6 +26,24 @@ export default function AdminLoginPage() {
       const success = await login(username, password)
 
       if (success) {
+        // Store admin token in localStorage for persistence
+        try {
+          // Make a request to get the token
+          const response = await axios.post("/api/auth/login", {
+            username,
+            password,
+          })
+
+          if (response.data.success && response.data.token) {
+            // Store the token in localStorage
+            localStorage.setItem("adminToken", response.data.token)
+            // Set the token in axios headers
+            axios.defaults.headers.common["Authorization"] = `Bearer ${response.data.token}`
+          }
+        } catch (err) {
+          console.error("Failed to store admin token:", err)
+        }
+
         // Redirect to admin dashboard after successful login
         router.push("/admin/dashboard")
       } else {
@@ -108,4 +127,3 @@ export default function AdminLoginPage() {
     </div>
   )
 }
-

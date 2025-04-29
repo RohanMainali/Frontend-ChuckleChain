@@ -6,8 +6,9 @@ import { createContext, useContext, useState, useEffect } from "react"
 import type { User } from "@/lib/types"
 import axios from "axios"
 
-// Configure axios
+// Use the deployed API URL
 axios.defaults.baseURL = "https://chucklechain-api.onrender.com"
+// Ensure credentials are sent with all requests
 axios.defaults.withCredentials = true
 
 type AuthContextType = {

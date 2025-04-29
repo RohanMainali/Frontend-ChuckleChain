@@ -10,6 +10,7 @@ import { LogOut } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 import AdminSidebar from "./sidebar"
 import { Button } from "@/components/ui/button"
+import axios from "axios"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading, logout } = useAuth()
@@ -35,6 +36,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       }
     }
   }, [isLoading, user, router, pathname])
+
+  // Add this new function to handle token-based authentication
+  const checkAdminAuth = async () => {
+    try {
+      const token = localStorage.getItem("adminToken")
+      if (token) {
+        // Set the token in axios headers for all subsequent requests
+        axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
+      }
+    } catch (error) {
+      console.error("Error checking admin auth:", error)
+    }
+  }
+
+  // Add a new useEffect to run the auth check on mount
+  useEffect(() => {
+    checkAdminAuth()
+  }, [])
 
   // Show loading state while checking authentication
   if (isLoading && pathname !== "/admin/login") {
