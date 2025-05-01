@@ -26,25 +26,22 @@ import {
 import {
   Search,
   MoreHorizontal,
-  UserCog,
-  Shield,
-  UserX,
   Eye,
   Edit,
   Trash2,
   RefreshCcw,
   Filter,
-  SortAsc,
-  SortDesc,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
   UserPlus,
   Download,
+  Ban,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Textarea } from "@/components/ui/textarea"
 
 interface AdminUser {
   id: string
@@ -56,7 +53,9 @@ interface AdminUser {
   lastActive: string
   postCount: number
   followerCount: number
-  status?: "active" | "suspended" | "pending"
+  status: "active" | "suspended"
+  suspensionReason?: string
+  suspendedAt?: string
 }
 
 export default function UsersPage() {
@@ -68,11 +67,31 @@ export default function UsersPage() {
   const [error, setError] = useState("")
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [suspendDialogOpen, setSuspendDialogOpen] = useState(false)
+  const [suspensionReason, setSuspensionReason] = useState("")
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [addUserDialogOpen, setAddUserDialogOpen] = useState(false)
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [sortField, setSortField] = useState<string>("username")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const [filterOptions, setFilterOptions] = useState({
+    minPosts: "",
+    maxPosts: "",
+    minFollowers: "",
+    maxFollowers: "",
+    joinedAfter: "",
+    joinedBefore: "",
+  })
+  const [newUser, setNewUser] = useState({
+    username: "",
+    email: "",
+    password: "",
+    role: "user",
+    adminToken: "",
+  })
+  const [viewSuspensionDetailsOpen, setViewSuspensionDetailsOpen] = useState(false)
   const { toast } = useToast()
 
   const fetchUsers = async () => {
@@ -87,6 +106,7 @@ export default function UsersPage() {
       }))
 
       setUsers(processedUsers)
+      setFilteredUsers(processedUsers)
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to load users")
     } finally {
@@ -122,6 +142,33 @@ export default function UsersPage() {
       result = result.filter((user) => user.status === statusFilter)
     }
 
+    // Apply advanced filters
+    if (filterOptions.minPosts && !isNaN(Number(filterOptions.minPosts))) {
+      result = result.filter((user) => user.postCount >= Number(filterOptions.minPosts))
+    }
+
+    if (filterOptions.maxPosts && !isNaN(Number(filterOptions.maxPosts))) {
+      result = result.filter((user) => user.postCount <= Number(filterOptions.maxPosts))
+    }
+
+    if (filterOptions.minFollowers && !isNaN(Number(filterOptions.minFollowers))) {
+      result = result.filter((user) => user.followerCount >= Number(filterOptions.minFollowers))
+    }
+
+    if (filterOptions.maxFollowers && !isNaN(Number(filterOptions.maxFollowers))) {
+      result = result.filter((user) => user.followerCount <= Number(filterOptions.maxFollowers))
+    }
+
+    if (filterOptions.joinedAfter) {
+      const afterDate = new Date(filterOptions.joinedAfter)
+      result = result.filter((user) => new Date(user.createdAt) >= afterDate)
+    }
+
+    if (filterOptions.joinedBefore) {
+      const beforeDate = new Date(filterOptions.joinedBefore)
+      result = result.filter((user) => new Date(user.createdAt) <= beforeDate)
+    }
+
     // Apply sorting
     result.sort((a, b) => {
       let comparison = 0
@@ -153,53 +200,60 @@ export default function UsersPage() {
     })
 
     setFilteredUsers(result)
-  }, [searchQuery, users, roleFilter, statusFilter, sortField, sortDirection])
+  }, [searchQuery, users, roleFilter, statusFilter, sortField, sortDirection, filterOptions])
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
+  const handleStatusChange = async (userId: string, newStatus: "active" | "suspended") => {
     try {
       setRefreshing(true)
-      await axios.put(`/api/admin/users/${userId}`, { role: newRole })
+
+      // If suspending, we need a reason
+      if (newStatus === "suspended" && !suspensionReason.trim()) {
+        toast({
+          title: "Suspension reason required",
+          description: "Please provide a reason for suspending this user.",
+          variant: "destructive",
+        })
+        setRefreshing(false)
+        return
+      }
+
+      // Create the payload based on the action
+      const payload = newStatus === "suspended" ? { status: newStatus, suspensionReason } : { status: newStatus }
+
+      await axios.put(`/api/admin/users/${userId}/status`, payload)
 
       // Update local state
-      setUsers(users.map((user) => (user.id === userId ? { ...user, role: newRole } : user)))
+      setUsers(
+        users.map((user) => {
+          if (user.id === userId) {
+            return {
+              ...user,
+              status: newStatus,
+              suspensionReason: newStatus === "suspended" ? suspensionReason : "",
+              suspendedAt: newStatus === "suspended" ? new Date().toISOString() : null,
+            }
+          }
+          return user
+        }),
+      )
 
       toast({
-        title: "Role updated",
-        description: `User role has been updated to ${newRole}`,
+        title: `User ${newStatus === "active" ? "activated" : "suspended"}`,
+        description: `User has been ${newStatus === "active" ? "activated" : "suspended"} successfully.`,
       })
-    } catch (err: any) {
-      console.error("Error updating user role:", err)
-      toast({
-        title: "Error",
-        description: err.response?.data?.message || "Failed to update user role",
-        variant: "destructive",
-      })
-    } finally {
-      setRefreshing(false)
-    }
-  }
 
-  const handleStatusChange = async (userId: string, newStatus: "active" | "suspended" | "pending") => {
-    try {
-      setRefreshing(true)
-      await axios.put(`/api/admin/users/${userId}`, { status: newStatus })
-
-      // Update local state
-      setUsers(users.map((user) => (user.id === userId ? { ...user, status: newStatus } : user)))
-
-      toast({
-        title: "Status updated",
-        description: `User status has been updated to ${newStatus}`,
-      })
+      // Reset suspension reason
+      setSuspensionReason("")
     } catch (err: any) {
       console.error("Error updating user status:", err)
       toast({
         title: "Error",
-        description: err.response?.data?.message || "Failed to update user status",
+        description: err.response?.data?.message || `Failed to ${newStatus} user`,
         variant: "destructive",
       })
     } finally {
       setRefreshing(false)
+      setSuspendDialogOpen(false)
     }
   }
 
@@ -225,6 +279,90 @@ export default function UsersPage() {
     }
   }
 
+  const handleAddUser = async () => {
+    try {
+      if (!newUser.username || !newUser.email || !newUser.password) {
+        toast({
+          title: "Missing information",
+          description: "Please fill in all required fields",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (newUser.role === "admin" && !newUser.adminToken) {
+        toast({
+          title: "Admin token required",
+          description: "Please provide an admin registration token",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Save the current admin token before making the request
+      const currentAdminToken = localStorage.getItem("adminToken")
+
+      const endpoint = newUser.role === "admin" ? "/api/auth/admin-signup" : "/api/auth/signup"
+      const payload =
+        newUser.role === "admin"
+          ? {
+              username: newUser.username,
+              email: newUser.email,
+              password: newUser.password,
+              adminToken: newUser.adminToken,
+              preventLogin: true, // Add this flag to prevent automatic login
+            }
+          : {
+              username: newUser.username,
+              email: newUser.email,
+              password: newUser.password,
+              preventLogin: true, // Add this flag to prevent automatic login
+            }
+
+      const response = await axios.post(endpoint, payload)
+
+      // Restore the admin token after the request
+      if (currentAdminToken) {
+        localStorage.setItem("adminToken", currentAdminToken)
+        axios.defaults.headers.common["Authorization"] = `Bearer ${currentAdminToken}`
+      }
+
+      // Check if the response contains the expected data
+      if (response.data && response.data.success) {
+        toast({
+          title: "User created",
+          description: `User ${newUser.username} has been created successfully`,
+        })
+
+        // Reset form and close dialog
+        setNewUser({
+          username: "",
+          email: "",
+          password: "",
+          role: "user",
+          adminToken: "",
+        })
+        setAddUserDialogOpen(false)
+
+        // Refresh user list
+        fetchUsers()
+      } else {
+        // Handle unexpected response format
+        toast({
+          title: "Warning",
+          description: "User may have been created but the response was unexpected",
+        })
+        setAddUserDialogOpen(false)
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error creating user",
+        description: err.response?.data?.message || "Failed to create user",
+        variant: "destructive",
+      })
+    }
+  }
+
   const toggleSort = (field: string) => {
     if (sortField === field) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc")
@@ -236,7 +374,29 @@ export default function UsersPage() {
 
   const getSortIcon = (field: string) => {
     if (sortField !== field) return null
-    return sortDirection === "asc" ? <SortAsc className="h-3 w-3 ml-1" /> : <SortDesc className="h-3 w-3 ml-1" />
+    return sortDirection === "asc" ? (
+      <svg className="h-3 w-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+      </svg>
+    ) : (
+      <svg className="h-3 w-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    )
+  }
+
+  const resetFilters = () => {
+    setFilterOptions({
+      minPosts: "",
+      maxPosts: "",
+      minFollowers: "",
+      maxFollowers: "",
+      joinedAfter: "",
+      joinedBefore: "",
+    })
+    setRoleFilter("all")
+    setStatusFilter("all")
+    setSearchQuery("")
   }
 
   const userStats = useMemo(() => {
@@ -245,25 +405,15 @@ export default function UsersPage() {
       admins: users.filter((user) => user.role === "admin").length,
       active: users.filter((user) => user.status === "active").length,
       suspended: users.filter((user) => user.status === "suspended").length,
-      pending: users.filter((user) => user.status === "pending").length,
     }
   }, [users])
 
   const renderStatusBadge = (status: string) => {
     switch (status) {
       case "active":
-        return <Badge className="bg-green-500">Active</Badge>
+        return <Badge className="bg-emerald-500 hover:bg-emerald-600">Active</Badge>
       case "suspended":
         return <Badge variant="destructive">Suspended</Badge>
-      case "pending":
-        return (
-          <Badge
-            variant="outline"
-            className="text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800"
-          >
-            Pending
-          </Badge>
-        )
       default:
         return <Badge variant="outline">Unknown</Badge>
     }
@@ -326,11 +476,22 @@ export default function UsersPage() {
           <p className="text-muted-foreground">View and manage user accounts</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchUsers} disabled={refreshing}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchUsers}
+            disabled={refreshing}
+            className="transition-all duration-200 hover:bg-muted"
+          >
             <RefreshCcw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Refreshing..." : "Refresh"}
           </Button>
-          <Button variant="default" size="sm">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => setAddUserDialogOpen(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white"
+          >
             <UserPlus className="h-4 w-4 mr-2" />
             Add User
           </Button>
@@ -338,14 +499,16 @@ export default function UsersPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">
-        <Card className="md:col-span-1">
+        <Card className="md:col-span-1 bg-card border-border shadow-sm">
           <CardHeader>
             <CardTitle>User Statistics</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex justify-between items-center">
               <span className="text-sm">Total Users</span>
-              <Badge variant="secondary">{userStats.total}</Badge>
+              <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
+                {userStats.total}
+              </Badge>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm">Administrators</span>
@@ -360,7 +523,7 @@ export default function UsersPage() {
               <span className="text-sm">Active Users</span>
               <Badge
                 variant="outline"
-                className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800"
+                className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800"
               >
                 {userStats.active}
               </Badge>
@@ -372,15 +535,6 @@ export default function UsersPage() {
                 className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800"
               >
                 {userStats.suspended}
-              </Badge>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm">Pending</span>
-              <Badge
-                variant="outline"
-                className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800"
-              >
-                {userStats.pending}
               </Badge>
             </div>
           </CardContent>
@@ -403,7 +557,7 @@ export default function UsersPage() {
           </CardFooter>
         </Card>
 
-        <Card className="md:col-span-4">
+        <Card className="md:col-span-4 bg-card border-border shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle>Users</CardTitle>
             <CardDescription>Total of {users.length} users registered on the platform</CardDescription>
@@ -415,16 +569,15 @@ export default function UsersPage() {
                 <Input
                   type="search"
                   placeholder="Search users..."
-                  className="pl-8"
+                  className="pl-8 bg-background"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
               <div className="flex items-center gap-2 w-full md:w-auto">
                 <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger className="w-[130px]">
+                  <SelectTrigger className="w-[130px] bg-background">
                     <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4" />
                       <span>Role: {roleFilter}</span>
                     </div>
                   </SelectTrigger>
@@ -436,9 +589,8 @@ export default function UsersPage() {
                 </Select>
 
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[130px]">
+                  <SelectTrigger className="w-[130px] bg-background">
                     <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4" />
                       <span>Status: {statusFilter}</span>
                     </div>
                   </SelectTrigger>
@@ -446,16 +598,117 @@ export default function UsersPage() {
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="suspended">Suspended</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
                   </SelectContent>
                 </Select>
+
+                <Popover open={filterMenuOpen} onOpenChange={setFilterMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="icon" className="bg-background">
+                      <Filter className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80" align="end">
+                    <div className="space-y-4">
+                      <h4 className="font-medium">Advanced Filters</h4>
+
+                      <div className="space-y-2">
+                        <h5 className="text-sm font-medium">Posts</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-xs">Min Posts</label>
+                            <Input
+                              type="number"
+                              placeholder="Min"
+                              value={filterOptions.minPosts}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, minPosts: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs">Max Posts</label>
+                            <Input
+                              type="number"
+                              placeholder="Max"
+                              value={filterOptions.maxPosts}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, maxPosts: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h5 className="text-sm font-medium">Followers</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-xs">Min Followers</label>
+                            <Input
+                              type="number"
+                              placeholder="Min"
+                              value={filterOptions.minFollowers}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, minFollowers: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs">Max Followers</label>
+                            <Input
+                              type="number"
+                              placeholder="Max"
+                              value={filterOptions.maxFollowers}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, maxFollowers: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h5 className="text-sm font-medium">Join Date</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-xs">After</label>
+                            <Input
+                              type="date"
+                              value={filterOptions.joinedAfter}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, joinedAfter: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs">Before</label>
+                            <Input
+                              type="date"
+                              value={filterOptions.joinedBefore}
+                              onChange={(e) => setFilterOptions({ ...filterOptions, joinedBefore: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between pt-2">
+                        <Button variant="outline" size="sm" onClick={resetFilters}>
+                          Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => setFilterMenuOpen(false)}
+                          className="bg-purple-600 hover:bg-purple-700"
+                        >
+                          Apply Filters
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow className="bg-muted/40 hover:bg-muted/60">
                     <TableHead className="cursor-pointer" onClick={() => toggleSort("username")}>
                       <div className="flex items-center">User {getSortIcon("username")}</div>
                     </TableHead>
@@ -479,13 +732,13 @@ export default function UsersPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
+                    <TableRow key={user.id} className="group">
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <img
                             src={user.profilePicture || "/placeholder.svg?height=40&width=40"}
                             alt={user.username}
-                            className="h-10 w-10 rounded-full object-cover"
+                            className="h-10 w-10 rounded-full object-cover border border-border"
                           />
                           <div>
                             <div className="font-medium">{user.username}</div>
@@ -496,11 +749,26 @@ export default function UsersPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {user.role === "admin" ? (
-                            <Badge className="bg-purple-500">Admin</Badge>
+                            <Badge className="bg-purple-500 hover:bg-purple-600">Admin</Badge>
                           ) : (
                             <Badge variant="outline">User</Badge>
                           )}
-                          {renderStatusBadge(user.status || "active")}
+                          <div className="flex items-center">
+                            {renderStatusBadge(user.status || "active")}
+                            {user.status === "suspended" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 ml-1"
+                                onClick={() => {
+                                  setSelectedUser(user)
+                                  setViewSuspensionDetailsOpen(true)
+                                }}
+                              >
+                                <AlertCircle className="h-4 w-4 text-amber-500" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
@@ -511,12 +779,16 @@ export default function UsersPage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
                               <MoreHorizontal className="h-4 w-4" />
                               <span className="sr-only">Open menu</span>
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
+                          <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuItem onClick={() => window.open(`/profile/${user.username}`, "_blank")}>
                               <Eye className="mr-2 h-4 w-4" />
@@ -532,36 +804,23 @@ export default function UsersPage() {
                               Edit User
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuLabel>Role Management</DropdownMenuLabel>
-                            {user.role === "admin" ? (
-                              <DropdownMenuItem onClick={() => handleRoleChange(user.id, "user")}>
-                                <UserCog className="mr-2 h-4 w-4" />
-                                Demote to User
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem onClick={() => handleRoleChange(user.id, "admin")}>
-                                <Shield className="mr-2 h-4 w-4" />
-                                Promote to Admin
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
                             <DropdownMenuLabel>Status Management</DropdownMenuLabel>
-                            {user.status !== "active" && (
+                            {user.status === "suspended" ? (
                               <DropdownMenuItem onClick={() => handleStatusChange(user.id, "active")}>
                                 <CheckCircle className="mr-2 h-4 w-4" />
                                 Activate User
                               </DropdownMenuItem>
-                            )}
-                            {user.status !== "suspended" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(user.id, "suspended")}>
-                                <XCircle className="mr-2 h-4 w-4" />
+                            ) : (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedUser(user)
+                                  setSuspensionReason("")
+                                  setSuspendDialogOpen(true)
+                                }}
+                                className="text-amber-600 focus:text-amber-600"
+                              >
+                                <Ban className="mr-2 h-4 w-4" />
                                 Suspend User
-                              </DropdownMenuItem>
-                            )}
-                            {user.status !== "pending" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(user.id, "pending")}>
-                                <AlertCircle className="mr-2 h-4 w-4" />
-                                Mark as Pending
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
@@ -583,10 +842,25 @@ export default function UsersPage() {
 
                   {filteredUsers.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-6">
+                      <TableCell colSpan={6} className="text-center py-10">
                         <div className="flex flex-col items-center justify-center text-muted-foreground">
-                          <UserX className="h-12 w-12 mb-2" />
+                          <svg className="h-12 w-12 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={1.5}
+                              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                            />
+                          </svg>
                           <p>No users found</p>
+                          {Object.values(filterOptions).some((val) => val !== "") ||
+                          roleFilter !== "all" ||
+                          statusFilter !== "all" ||
+                          searchQuery ? (
+                            <Button variant="link" onClick={resetFilters} className="mt-2">
+                              Clear filters
+                            </Button>
+                          ) : null}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -600,20 +874,23 @@ export default function UsersPage() {
 
       {/* Delete User Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Delete User
+            </DialogTitle>
             <DialogDescription>
               Are you sure you want to delete this user? This action cannot be undone and will permanently remove the
               user account and all associated data.
             </DialogDescription>
           </DialogHeader>
           {selectedUser && (
-            <div className="flex items-center gap-3 py-2">
+            <div className="flex items-center gap-3 py-2 border rounded-md p-3 bg-muted/20">
               <img
                 src={selectedUser.profilePicture || "/placeholder.svg?height=40&width=40"}
                 alt={selectedUser.username}
-                className="h-10 w-10 rounded-full object-cover"
+                className="h-10 w-10 rounded-full object-cover border border-border"
               />
               <div>
                 <div className="font-medium">{selectedUser.username}</div>
@@ -621,13 +898,134 @@ export default function UsersPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={() => selectedUser && handleDeleteUser(selectedUser.id)}>
               Delete
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suspend User Confirmation Dialog */}
+      <Dialog open={suspendDialogOpen} onOpenChange={setSuspendDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-amber-600 flex items-center gap-2">
+              <Ban className="h-5 w-5" />
+              Suspend User
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to suspend this user? They will not be able to log in or use the platform until
+              reactivated.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedUser && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 py-2 border rounded-md p-3 bg-muted/20">
+                <img
+                  src={selectedUser.profilePicture || "/placeholder.svg?height=40&width=40"}
+                  alt={selectedUser.username}
+                  className="h-10 w-10 rounded-full object-cover border border-border"
+                />
+                <div>
+                  <div className="font-medium">{selectedUser.username}</div>
+                  <div className="text-sm text-muted-foreground">{selectedUser.email}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="suspension-reason" className="text-sm font-medium">
+                  Suspension Reason <span className="text-red-500">*</span>
+                </label>
+                <Textarea
+                  id="suspension-reason"
+                  placeholder="Please provide a reason for suspending this user"
+                  value={suspensionReason}
+                  onChange={(e) => setSuspensionReason(e.target.value)}
+                  className="min-h-[80px]"
+                />
+                {suspensionReason.trim() === "" && (
+                  <p className="text-xs text-red-500">A suspension reason is required</p>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setSuspendDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => selectedUser && handleStatusChange(selectedUser.id, "suspended")}
+              disabled={suspensionReason.trim() === ""}
+            >
+              Suspend
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Suspension Details Dialog */}
+      <Dialog open={viewSuspensionDetailsOpen} onOpenChange={setViewSuspensionDetailsOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Suspension Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedUser && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 py-2 border rounded-md p-3 bg-muted/20">
+                <img
+                  src={selectedUser.profilePicture || "/placeholder.svg?height=40&width=40"}
+                  alt={selectedUser.username}
+                  className="h-10 w-10 rounded-full object-cover border border-border"
+                />
+                <div>
+                  <div className="font-medium">{selectedUser.username}</div>
+                  <div className="text-sm text-muted-foreground">{selectedUser.email}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium">Suspended On:</span>
+                  <span className="text-sm">
+                    {selectedUser.suspendedAt ? new Date(selectedUser.suspendedAt).toLocaleString() : "Unknown"}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-sm font-medium">Reason for Suspension:</span>
+                  <div className="p-3 bg-muted rounded-md text-sm">
+                    {selectedUser.suspensionReason || "No reason provided"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setViewSuspensionDetailsOpen(false)}>
+              Close
+            </Button>
+            {selectedUser && selectedUser.status === "suspended" && (
+              <Button
+                variant="default"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => {
+                  handleStatusChange(selectedUser.id, "active")
+                  setViewSuspensionDetailsOpen(false)
+                }}
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                Reactivate User
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -646,7 +1044,7 @@ export default function UsersPage() {
                   <img
                     src={selectedUser.profilePicture || "/placeholder.svg?height=80&width=80"}
                     alt={selectedUser.username}
-                    className="h-20 w-20 rounded-full object-cover"
+                    className="h-20 w-20 rounded-full object-cover border border-border"
                   />
                   <Button
                     size="sm"
@@ -670,20 +1068,6 @@ export default function UsersPage() {
                 <Input id="email" defaultValue={selectedUser.email} className="col-span-3" />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <label htmlFor="role" className="text-right text-sm font-medium">
-                  Role
-                </label>
-                <Select defaultValue={selectedUser.role} id="role">
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Select a role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="user">User</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
                 <label htmlFor="status" className="text-right text-sm font-medium">
                   Status
                 </label>
@@ -694,7 +1078,6 @@ export default function UsersPage() {
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="suspended">Suspended</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -710,9 +1093,6 @@ export default function UsersPage() {
                   // Get the form values
                   const username = (document.getElementById("username") as HTMLInputElement)?.value
                   const email = (document.getElementById("email") as HTMLInputElement)?.value
-                  const role =
-                    (document.querySelector("[data-value]") as HTMLElement)?.getAttribute("data-value") ||
-                    selectedUser.role
                   const status =
                     (document.querySelector("[data-value]") as HTMLElement)?.getAttribute("data-value") ||
                     selectedUser.status ||
@@ -722,7 +1102,6 @@ export default function UsersPage() {
                   handleEditUser(selectedUser.id, {
                     username,
                     email,
-                    role,
                     status,
                   })
                 }
@@ -730,6 +1109,86 @@ export default function UsersPage() {
             >
               Save changes
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add User Dialog */}
+      <Dialog open={addUserDialogOpen} onOpenChange={setAddUserDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Add New User</DialogTitle>
+            <DialogDescription>Create a new user account.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="new-username" className="text-right text-sm font-medium">
+                Username*
+              </label>
+              <Input
+                id="new-username"
+                value={newUser.username}
+                onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="new-email" className="text-right text-sm font-medium">
+                Email*
+              </label>
+              <Input
+                id="new-email"
+                type="email"
+                value={newUser.email}
+                onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="new-password" className="text-right text-sm font-medium">
+                Password*
+              </label>
+              <Input
+                id="new-password"
+                type="password"
+                value={newUser.password}
+                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="new-role" className="text-right text-sm font-medium">
+                Role
+              </label>
+              <Select value={newUser.role} onValueChange={(value) => setNewUser({ ...newUser, role: value })}>
+                <SelectTrigger className="col-span-3" id="new-role">
+                  <SelectValue placeholder="Select a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">User</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {newUser.role === "admin" && (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <label htmlFor="admin-token" className="text-right text-sm font-medium">
+                  Admin Token*
+                </label>
+                <Input
+                  id="admin-token"
+                  type="password"
+                  value={newUser.adminToken}
+                  onChange={(e) => setNewUser({ ...newUser, adminToken: e.target.value })}
+                  className="col-span-3"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddUserDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddUser}>Create User</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
