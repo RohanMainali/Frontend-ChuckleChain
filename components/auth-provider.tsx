@@ -5,7 +5,7 @@ import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 import type { User } from "@/lib/types"
 import axios from "axios"
-
+import { useToast } from "@/components/ui/use-toast"
 // Use the deployed API URL
 axios.defaults.baseURL = "https://chucklechain-api.onrender.com"
 // Ensure credentials are sent with all requests
@@ -26,6 +26,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
 
   // Set up axios interceptor to include token in all requests
   useEffect(() => {
@@ -124,6 +125,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false
     } catch (error) {
       console.error("Login error:", error)
+
+      // Check if the error is due to account suspension
+      if (error.response && error.response.data && error.response.data.status === "suspended") {
+        toast({
+          title: "Account Suspended",
+          description: "Your account has been suspended. Please contact support for assistance.",
+          variant: "destructive",
+        })
+      }
+
       return false
     } finally {
       setIsLoading(false)
