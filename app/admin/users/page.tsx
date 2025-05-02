@@ -32,7 +32,7 @@ import {
   RefreshCcw,
   Filter,
   UserPlus,
-  Download,
+  MessageSquare,
   Ban,
   CheckCircle,
   AlertCircle,
@@ -42,6 +42,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { useRouter } from "next/navigation"
 
 interface AdminUser {
   id: string
@@ -92,7 +93,9 @@ export default function UsersPage() {
     adminToken: "",
   })
   const [viewSuspensionDetailsOpen, setViewSuspensionDetailsOpen] = useState(false)
+  const [pendingAppealsCount, setPendingAppealsCount] = useState(0)
   const { toast } = useToast()
+  const router = useRouter()
 
   const fetchUsers = async () => {
     try {
@@ -115,8 +118,20 @@ export default function UsersPage() {
     }
   }
 
+  const fetchPendingAppealsCount = async () => {
+    try {
+      const { data } = await axios.get("/api/appeals/count")
+      if (data && data.success) {
+        setPendingAppealsCount(data.data.pending)
+      }
+    } catch (err) {
+      console.error("Failed to fetch pending appeals count:", err)
+    }
+  }
+
   useEffect(() => {
     fetchUsers()
+    fetchPendingAppealsCount()
   }, [])
 
   // Apply filters and sorting
@@ -539,20 +554,10 @@ export default function UsersPage() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button variant="outline" size="sm" className="w-full" asChild>
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
-                  toast({
-                    title: "Export initiated",
-                    description: "User data export has started. You'll be notified when it's ready.",
-                  })
-                }}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Users
-              </a>
+            <Button variant="outline" size="sm" className="w-full" onClick={() => router.push("/admin/appeals")}>
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Appeals
+              {pendingAppealsCount > 0 && <Badge className="ml-2 bg-red-500 text-white">{pendingAppealsCount}</Badge>}
             </Button>
           </CardFooter>
         </Card>
