@@ -35,11 +35,6 @@ const sidebarItems = [
     hasBadge: true,
   },
   {
-    title: "Downloads",
-    href: "/admin/download",
-    icon: <Download className="h-5 w-5" />,
-  },
-  {
     title: "Settings",
     href: "/admin/settings",
     icon: <Settings className="h-5 w-5" />,

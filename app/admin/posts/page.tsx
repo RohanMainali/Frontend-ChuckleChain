@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useRouter } from "next/navigation";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   DropdownMenu,
@@ -87,6 +88,8 @@ export default function PostsPage() {
   const [endDate, setEndDate] = useState<Date | undefined>(undefined)
   const [isDownloading, setIsDownloading] = useState(false)
   const { toast } = useToast()
+  const router = useRouter();
+
 
   // Update the fetchPosts function to handle errors properly and validate data
   const fetchPosts = async () => {
@@ -521,24 +524,9 @@ export default function PostsPage() {
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                <Button variant="outline" size="sm" className="w-full" onClick={() => setDownloadDialogOpen(true)}>
+                <Button variant="outline" size="sm" className="w-full" onClick={() => router.push("/admin/download")}>
                   <Download className="h-4 w-4 mr-2" />
                   Download Memes
-                </Button>
-                <Button variant="outline" size="sm" className="w-full" asChild>
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      toast({
-                        title: "Export initiated",
-                        description: "Content data export has started. You'll be notified when it's ready.",
-                      })
-                    }}
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Export Data
-                  </a>
                 </Button>
               </CardFooter>
             </Card>
@@ -880,80 +868,6 @@ export default function PostsPage() {
             </Button>
             <Button variant="destructive" onClick={() => selectedPost && handleDeletePost(selectedPost.id)}>
               Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Download Memes Dialog */}
-      <Dialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Download Memes</DialogTitle>
-            <DialogDescription>
-              Select a date range to download all memes created within that period as a zip file.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Start Date</label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={`w-full justify-start text-left font-normal ${!startDate && "text-muted-foreground"}`}
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "PPP") : "Select date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent mode="single" selected={startDate} onSelect={setStartDate} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">End Date</label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={`w-full justify-start text-left font-normal ${!endDate && "text-muted-foreground"}`}
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "PPP") : "Select date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent
-                      mode="single"
-                      selected={endDate}
-                      onSelect={setEndDate}
-                      initialFocus
-                      disabled={(date) => (startDate ? date < startDate : false)}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDownloadDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleDownloadPosts} disabled={!startDate || !endDate || isDownloading}>
-              {isDownloading ? (
-                <>
-                  <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
-                  Downloading...
-                </>
-              ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" />
-                  Download
-                </>
-              )}
             </Button>
           </DialogFooter>
         </DialogContent>
